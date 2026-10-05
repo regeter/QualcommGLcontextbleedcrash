@@ -218,9 +218,11 @@ class EglEngine {
     }
 
     /**
-     * Tears down the context, surface, and terminates the EGL display.
+     * Tears down the context, surface, and optionally terminates the process-wide EGL display.
+     * Pass terminateDisplay = false when another thread still holds an active context/surface on
+     * EGL_DEFAULT_DISPLAY.
      */
-    fun destroy() {
+    fun destroy(terminateDisplay: Boolean = true) {
         destroyContext()
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             if (eglSurface != EGL14.EGL_NO_SURFACE) {
@@ -228,9 +230,11 @@ class EglEngine {
                 eglSurface = EGL14.EGL_NO_SURFACE
                 Log.i(TAG, "EGL surface destroyed.")
             }
-            EGL14.eglTerminate(eglDisplay)
+            if (terminateDisplay) {
+                EGL14.eglTerminate(eglDisplay)
+                Log.i(TAG, "EGL terminated.")
+            }
             eglDisplay = EGL14.EGL_NO_DISPLAY
-            Log.i(TAG, "EGL terminated.")
         }
         eglConfig = null
     }

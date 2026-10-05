@@ -42,12 +42,8 @@ class MainActivity : AppCompatActivity() {
     private var isLogcatMonitoringActive = true
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
-
-    override fun attachBaseContext(newBase: Context) {
-        super.attachBaseContext(newBase)
-        Log.i(TAG, "MainActivity.attachBaseContext: Disabling shader disk cache...")
-        ShaderCacheUtil.disableShaderDiskCache(this)
-    }
+    @Volatile
+    private var isProcessPoisonedByRobustContext = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -301,11 +297,16 @@ class MainActivity : AppCompatActivity() {
             if (passedCount == results.size) {
                 logMessage("RESULT: BASELINE PASSED (Expected: Dynamic Indexing Shader links cleanly without robust access).")
             } else {
-                logMessage("RESULT: BASELINE FAILED (Unexpected link failure on standard context).")
+                if (isProcessPoisonedByRobustContext) {
+                    logMessage("RESULT: BASELINE FAILED (Expected if run after Robust Context tests).")
+                    logMessage("  NOTE: A robust context was previously created in this process session, which permanently poisoned the driver.")
+                    logMessage("  Force-stop and restart the application to run a clean, unpoisoned baseline.")
+                } else {
+                    logMessage("RESULT: BASELINE FAILED (Unexpected link failure on standard context).")
+                }
             }
         } finally {
             engine.destroy()
-            logMessage("EGL context destroyed.")
         }
     }
 
@@ -316,6 +317,7 @@ class MainActivity : AppCompatActivity() {
      * Proves: Robust access works normally when shaders do not use dynamic uniform indexing.
      */
     private fun executeRobustSafeTest() {
+        isProcessPoisonedByRobustContext = true
         logMessage("Step 1: Clearing shader disk cache...")
         ShaderCacheUtil.disableShaderDiskCache(this)
 
@@ -343,7 +345,6 @@ class MainActivity : AppCompatActivity() {
             }
         } finally {
             engine.destroy()
-            logMessage("EGL context destroyed.")
         }
     }
 
@@ -354,6 +355,7 @@ class MainActivity : AppCompatActivity() {
      * Proves: The direct root cause: Qualcomm Adreno's bounds-checking pass (GVI) aborts on dynamic uniform indexing.
      */
     private fun executeTriggerGviCrashTest() {
+        isProcessPoisonedByRobustContext = true
         logMessage("Step 1: Clearing shader disk cache to force fresh driver compilation...")
         ShaderCacheUtil.disableShaderDiskCache(this)
 
@@ -380,7 +382,6 @@ class MainActivity : AppCompatActivity() {
             }
         } finally {
             engine.destroy()
-            logMessage("EGL context destroyed.")
         }
     }
 
@@ -388,15 +389,18 @@ class MainActivity : AppCompatActivity() {
      * Button 4: Cross-Context Poisoning Test [Expect: BLEED / FAIL]
      * Demonstrates cross-context state bleeding between two independent contexts:
      *
-     * 1. Thread A (Context A - Robust Context):
+     * 1. Thread B (Context B1 - Standard Context Pre-Check):
+     *    Verifies that Dynamic Indexing Shader compiles cleanly on a Standard Context BEFORE robust context exists.
+     *
+     * 2. Thread A (Context A - Robust Context):
      *    Creates a ROBUST EGL context (0x30BF=1).
      *    Links the SAFE shader from Button 2. Result: SUCCESS (100% clean).
      *
-     * 2. Thread B (Context B - Standard Context):
+     * 3. Thread B (Context B2 - Standard Context Post-Check):
      *    Creates a STANDARD EGL context with ZERO robust attributes: attribs=[0x3098, 2, 0x3038].
-     *    Links Dynamic Indexing Shader (the EXACT shader that passed in Button 1!).
+     *    Links Dynamic Indexing Shader (the EXACT shader that passed in Step 1!).
      *
-     * 3. Result:
+     * 4. Result:
      *    Thread B FAILS with the GVI assertion on the standard context!
      *    Proves: Context A's robust access permanently leaked into Context B across the process.
      */
@@ -405,8 +409,35 @@ class MainActivity : AppCompatActivity() {
         ShaderCacheUtil.disableShaderDiskCache(this)
 
         logMessage("==================================================")
-        logMessage(">>> STEP 1: Thread A creates ROBUST context (0x30BF=1)...")
+        logMessage(">>> STEP 1: Thread B pre-check on STANDARD context (ZERO robust attributes)...")
+        logMessage("  Thread B attribs: [0x3098=2, 0x3038=EGL_NONE]")
 
+        val standardPreEngine = EglEngine()
+        var preCheckPassed = false
+        try {
+            standardPreEngine.init()
+            standardPreEngine.createContext(enableRobustness = false)
+            standardPreEngine.makeCurrent()
+            logMessage("[Thread B] Standard context created and made current.")
+
+            val preSalt = "pre_poison_${System.nanoTime()}"
+            val preRes = ShaderTestSuite.testDynamicIndexingShader(salt = preSalt)
+            logMessage(preRes.formattedOutput())
+            preCheckPassed = preRes.linkSuccess
+
+            if (preCheckPassed) {
+                logMessage("[Thread B Pre-Check]: PASSED on standard context as expected.")
+            } else {
+                logMessage("[Thread B Pre-Check]: FAILED (Process was already poisoned by an earlier robust test in this session).")
+            }
+        } finally {
+            standardPreEngine.destroy(terminateDisplay = false)
+        }
+
+        logMessage("--------------------------------------------------")
+        logMessage(">>> STEP 2: Thread A creates ROBUST context (0x30BF=1)...")
+
+        isProcessPoisonedByRobustContext = true
         val robustThread = Executors.newSingleThreadExecutor()
         val robustEngine = EglEngine()
         var robustError: Throwable? = null
@@ -432,39 +463,39 @@ class MainActivity : AppCompatActivity() {
 
         if (robustError != null) {
             logMessage("[Thread A ERROR]: ${robustError.message}")
-            robustEngine.destroy()
+            robustEngine.destroy(terminateDisplay = true)
             robustThread.shutdown()
             return
         }
 
         logMessage("--------------------------------------------------")
-        logMessage(">>> STEP 2: Thread B creates STANDARD context...")
+        logMessage(">>> STEP 3: Thread B creates STANDARD context while Thread A robust context is active...")
         logMessage("  Thread B attribs: [0x3098=2, 0x3038=EGL_NONE] (ZERO robust attributes!)")
 
-        val standardEngine = EglEngine()
+        val standardPostEngine = EglEngine()
         try {
-            standardEngine.init()
-            standardEngine.createContext(enableRobustness = false)
-            standardEngine.makeCurrent()
+            standardPostEngine.init()
+            standardPostEngine.createContext(enableRobustness = false)
+            standardPostEngine.makeCurrent()
             logMessage("[Thread B] Standard context created and made current.")
 
-            logMessage(">>> STEP 3: Thread B links Dynamic Indexing Shader (which PASSED in Button 1)...")
-            val salt = "poison_test_${System.nanoTime()}"
-            val res = ShaderTestSuite.testDynamicIndexingShader(salt = salt)
-            logMessage(res.formattedOutput())
+            logMessage(">>> Thread B links Dynamic Indexing Shader (which passed in Step 1)...")
+            val postSalt = "post_poison_${System.nanoTime()}"
+            val postRes = ShaderTestSuite.testDynamicIndexingShader(salt = postSalt)
+            logMessage(postRes.formattedOutput())
 
-            if (!res.linkSuccess) {
+            if (!postRes.linkSuccess) {
                 logMessage("[CRITICAL: CROSS-CONTEXT DRIVER BLEEDING CONFIRMED!]")
                 logMessage("Context B (STANDARD) FAILED to link Dynamic Indexing Shader!")
                 logMessage("  Context B Attribs: [0x3098, 2, 0x3038] (NO ROBUST ACCESS)")
-                logMessage("  Assertion Error  : ${res.linkInfoLog}")
-                logMessage("  Explanation: Robust access from Thread A permanently poisoned the process-wide Qualcomm compiler backend (libllvm-qcom.so)!")
+                logMessage("  Assertion Error  : ${postRes.linkInfoLog}")
+                logMessage("  Explanation: Robust access from Thread A permanently poisoned the process-wide Qualcomm compiler backend (/vendor/lib64/egl/libGLESv2_adreno.so / libllvm-glnext.so)!")
             } else {
                 logMessage("[NO POISONING DETECTED]: Dynamic Indexing Shader linked successfully on standard context.")
             }
         } finally {
-            standardEngine.destroy()
-            robustThread.submit { robustEngine.destroy() }.get()
+            standardPostEngine.destroy(terminateDisplay = false)
+            robustThread.submit { robustEngine.destroy(terminateDisplay = true) }.get()
             robustThread.shutdown()
             logMessage("EGL teardown complete.")
         }
