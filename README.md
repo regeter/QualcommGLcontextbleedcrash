@@ -89,17 +89,20 @@ The UI provides 4 sequential test buttons:
 
 ---
 
-### Button 3: `Direct Driver Bug (Robust + Dynamic Indexing)` [Expect: FAIL]
+### Button 3: `Direct Driver Bug (Robust + Dynamic Indexing)` [Expect: FAIL on Qualcomm]
 * **Context**: Robust access enabled (`0x30BF = 1`, `0x31BD = 0x31BE`).
 * **Shader**: Compiles the dynamic uniform array indexing shader.
-* **Expected Outcome**: **FAILS `glLinkProgram` with status = 0 (GL_FALSE)**.
+* **Outcome on Qualcomm Adreno (Pixel 5, Adreno 620)**: **FAILS `glLinkProgram` with status = 0 (`GL_FALSE`)**.
 * **Driver Assertion Captured**:
   ```
   I AdrenoGLES-0: Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
   E ADRENO_REPRO: Dynamic Indexing Shader LINK FAILED (status=0) in 7 ms.
   InfoLog: Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
   ```
-* **Proves**: The direct root cause in Qualcomm Adreno's driver: Adreno's `GVI` bounds-checking compiler pass asserts on dynamic uniform array indexing.
+* **Outcome on Control Device (Pixel 8 Pro, ARM Mali-G715)**: **PASSES (`GL_TRUE`) in 1 ms**.
+* **Proves**:
+  1. Dynamic uniform array indexing under `EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT` is 100% spec-compliant OpenGL ES code (`GL_KHR_robust_buffer_access_behavior` / `GL_EXT_robustness`). ARM Mali-G715 properly compiles and links it with zero warnings.
+  2. The failure on Adreno is exclusively a Qualcomm LLVM compiler crash: Qualcomm's internal bounds-checking pass (`GVI`) hits an unhandled assertion rather than emitting valid bounds clamping.
 
 ---
 
@@ -204,9 +207,31 @@ Context B (STANDARD) FAILED to link Dynamic Indexing Shader!
 **Driver & GPU Identification:**
 ```text
 GPU Initialized: Mali-G715 MC7 (OpenGL ES 3.2 v1.r56p0-18eac0.285f3c61d48c74d025f038abebe42a6a) | Vendor: ARM
+Driver Path: /vendor/lib64/egl/libGLES_mali.so
 ```
 
-**Cross-Context Poisoning Test Execution:**
+**Button 3: Direct Driver Bug Test (Robust Context + Dynamic Indexing):**
+```text
+>>> STARTING: 3. Direct Driver Bug Test (Robust Context + Dynamic Indexing)
+Creating ROBUST EGL context (0x30BF=1, 0x31BD=0x31BE)...
+Robust EGL context created successfully.
+Testing Dynamic Indexing Shader under Robust Context...
+--- Dynamic Indexing Shader (Dynamic uniform array indexing via attribute) ---
+  GL_RENDERER : Mali-G715 MC7
+  GL_VERSION  : OpenGL ES 3.2 v1.r56p0-18eac0.285f3c61d48c74d025f038abebe42a6a
+  GL_VENDOR   : ARM
+  VS Compile  : SUCCESS 
+  FS Compile  : SUCCESS 
+  Link Status : 1 (SUCCESS (GL_TRUE))
+  Link Time   : 1 ms
+  Link InfoLog: <empty>
+  Outcome     : PASSED
+
+RESULT: Dynamic Indexing Shader linked successfully (GL_TRUE).
+  NOTE: On standard-compliant GPUs (e.g. ARM Mali-G715), dynamic uniform array indexing under robust access is fully supported by the spec.
+```
+
+**Button 4: Cross-Context Poisoning Test:**
 ```text
 >>> STARTING: 4. Cross-Context Poisoning Test
 >>> STEP 1: Thread A creates ROBUST context (0x30BF=1)...

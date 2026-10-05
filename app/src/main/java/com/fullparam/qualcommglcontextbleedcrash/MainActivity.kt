@@ -378,7 +378,9 @@ class MainActivity : AppCompatActivity() {
                 logMessage("[DRIVER BUG CONFIRMED!] Dynamic Indexing Shader failed with expected assertion:")
                 logMessage("  ${result.linkInfoLog}")
             } else {
-                logMessage("RESULT: Dynamic Indexing Shader unexpectedly linked successfully. Driver may have patched this specific shader.")
+                logMessage("RESULT: Dynamic Indexing Shader linked successfully (GL_TRUE).")
+                logMessage("  NOTE: On standard-compliant GPUs (e.g. ARM Mali-G715), dynamic uniform array indexing under robust access is fully supported by the spec.")
+                logMessage("  If running on Qualcomm Adreno, the driver or OEM may have patched this GVI assertion.")
             }
         } finally {
             engine.destroy()
