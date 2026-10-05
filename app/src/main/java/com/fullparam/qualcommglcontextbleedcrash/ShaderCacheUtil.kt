@@ -7,15 +7,16 @@ import java.io.File
 object ShaderCacheUtil {
     private const val TAG = "ADRENO_REPRO"
     private const val SHADER_CACHE_NAME = "com.android.opengl.shaders_cache"
-    private const val NO_CACHE_NAME = ".nocache"
 
     /**
-     * Disables the Android OpenGL shader disk cache by targeting:
+     * Clears the Android OpenGL shader disk cache by deleting:
      * - File(codeCacheDir, "com.android.opengl.shaders_cache")
      * - File(createDeviceProtectedStorageContext().codeCacheDir, "com.android.opengl.shaders_cache")
      *
-     * If the target exists, it is deleted. Then the directory is created and an empty file
-     * named ".nocache" is created inside it to prevent shader binary caching.
+     * Note: Do not replace the cache file path with a directory, as Android's FileBlobCache
+     * (frameworks/native/opengl/libs/EGL/egl_cache.cpp) attempts to open() and mmap() this path as
+     * a regular file, which triggers an SELinux avc: denied { map } on directories. Per-compile
+     * unique salt comments in ShaderTestSuite already guarantee cache misses.
      */
     fun disableShaderDiskCache(context: Context): List<String> {
         val messages = mutableListOf<String>()
@@ -49,14 +50,11 @@ object ShaderCacheUtil {
                     val msg = "Existing shader cache at [${target.absolutePath}] deleted: $deleted"
                     Log.i(TAG, msg)
                     messages.add(msg)
+                } else {
+                    val msg = "No existing shader cache at [${target.absolutePath}]"
+                    Log.d(TAG, msg)
+                    messages.add(msg)
                 }
-
-                val dirCreated = target.mkdirs() || target.isDirectory
-                val noCacheFile = File(target, NO_CACHE_NAME)
-                val touched = noCacheFile.exists() || noCacheFile.createNewFile()
-                val msg = "Shader cache directory [${target.absolutePath}] created=$dirCreated, $NO_CACHE_NAME touched=$touched"
-                Log.i(TAG, msg)
-                messages.add(msg)
             } catch (e: Exception) {
                 val err = "Error handling shader cache target [${target.absolutePath}]: ${e.message}"
                 Log.e(TAG, err, e)

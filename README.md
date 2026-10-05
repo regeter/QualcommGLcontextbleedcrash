@@ -19,7 +19,7 @@ On Qualcomm Adreno 6xx and 7xx series GPUs (e.g., Adreno 620 on Snapdragon 765G,
    ```c
    EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT = 0x30BF (value: 1)
    ```
-   Qualcomm's proprietary LLVM-based shader compiler backend (`libllvm-qcom.so` / `libcompiler-qcom.so`) enables internal bounds-checking verification passes (`GVI` - Global Variable Indexing). When a vertex shader performs dynamic uniform array indexing via a vertex attribute (e.g. `uPalette[int(aIndex.r)]`), the compiler's bounds-checking pass hits an unhandled case, triggers an internal assertion, and aborts program linkage:
+   Qualcomm's proprietary LLVM-based shader compiler backend (`/vendor/lib64/egl/libGLESv2_adreno.so` / `libllvm-glnext.so`) enables internal bounds-checking verification passes (`GVI` - Global Variable Indexing). When a vertex shader performs dynamic uniform array indexing via a vertex attribute (e.g. `uPalette[int(aIndex.r)]`), the compiler's bounds-checking pass hits an unhandled case, triggers an internal assertion, and aborts program linkage:
    ```
    Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
    ```
@@ -104,53 +104,146 @@ The UI provides 4 sequential test buttons:
 ---
 
 ### Button 4: `Cross-Context Poisoning Test` [Expect: BLEED / FAIL]
-Demonstrates cross-context state bleeding between two independent contexts:
+Demonstrates cross-context state bleeding between two independent contexts in a self-contained 3-step sequence:
 
-1. **Thread A**:
+1. **Step 1 (Thread B Pre-Check - Standard Context)**:
+   - Creates a **STANDARD EGL Context** (`attribList = [0x3098, 2, 0x3038]`).
+   - Links the **Dynamic Indexing Shader**.
+   - **Result**: `SUCCESS (GL_TRUE)` (Proves it works before any robust context is created).
+
+2. **Step 2 (Thread A - Robust Context)**:
    - Creates a **ROBUST EGL Context** (`0x30BF = 1`).
    - Links the **Safe Shader** from Button 2.
-   - **Result**: `SUCCESS` (100% clean).
+   - **Result**: `SUCCESS (GL_TRUE)` (100% clean).
    - Keeps the robust context alive.
 
-2. **Thread B**:
-   - Creates an independent **STANDARD EGL Context** on a separate thread.
-   - Passes **ZERO robust attributes**:
+3. **Step 3 (Thread B Post-Check - Standard Context)**:
+   - Creates another **STANDARD EGL Context** with **ZERO robust attributes**:
      ```c
      attribList = [0x3098, 2, 0x3038]
      ```
-   - Links the **Dynamic Indexing Shader** (the **exact same shader that passed in Button 1**).
-
-3. **Expected Outcome**: **FAILS on Thread B's Standard Context (`GL_FALSE`)!**
-   ```text
-   Thread B: Creating STANDARD (non-robust) context while Robust context is ALIVE...
-     Thread B attribs: [0x3098=2, 0x3038=EGL_NONE] (ZERO robust attributes!)
-   Standard EGL context created successfully.
-   [Thread B] Linking Dynamic Indexing Shader with fresh salt...
-
-   Link Status : 0 (FAILED (GL_FALSE))
-   Link Time   : 7 ms
-   Link InfoLog: Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
-   Outcome     : FAILED
-
-   [CRITICAL: CROSS-CONTEXT DRIVER BLEEDING CONFIRMED!]
-   Context B (STANDARD) FAILED to link Dynamic Indexing Shader!
-     Context B Attribs: [0x3098, 2, 0x3038] (NO ROBUST ACCESS)
-     Assertion Error  : Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
-     Explanation: Robust access from Thread A permanently poisoned the process-wide Qualcomm compiler backend (libllvm-qcom.so)!
-   ```
-* **Proves**: Context A's robust access attribute permanently poisoned the process-wide Qualcomm compiler backend (`libllvm-qcom.so`), causing an independent context with zero robust attributes to fail linking valid GLSL shaders.
+   - Links the **Dynamic Indexing Shader** (the exact same shader that passed in Step 1).
+   - **Result**: **FAILS on Thread B's Standard Context (`GL_FALSE`)!**
+   - **Driver Assertion**:
+     ```text
+     Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
+     ```
+   - **Proves**: Context A's robust access attribute permanently poisoned the process-wide Qualcomm compiler backend (`/vendor/lib64/egl/libGLESv2_adreno.so` / `libllvm-glnext.so`), causing an independent context with zero robust attributes to fail linking valid GLSL shaders.
 
 ---
 
 ## 4. Technical Safeguards Implemented
 
 1. **In-Memory Driver Shader Cache Bypassing**: Qualcomm's driver caches compiled program binaries in process memory. The test suite prepends a unique salt comment `// Salt: $nanoTime` to the vertex shader source on every compile pass, preventing the driver from reusing previously compiled in-memory binaries.
-2. **Disk Shader Cache Disabling**: `ShaderCacheUtil.disableShaderDiskCache(context)` is invoked in `Application.attachBaseContext()` and before every test run. It deletes existing cache files under `code_cache/com.android.opengl.shaders_cache`, creates the directory, and touches `.nocache` inside it.
-3. **Real-time Native Logcat Streaming**: A background thread monitors `logcat --pid=$myPid` and pipes native messages directly into the on-screen console (`[SYS] ...`), ensuring assertions printed by `libEGL` or `AdrenoGLES-0` are immediately visible.
+2. **Disk Shader Cache Disabling**: `ShaderCacheUtil.disableShaderDiskCache(context)` deletes existing cache files under `code_cache/com.android.opengl.shaders_cache` on startup and before each test run, while unique salt comments ensure 100% cache misses without causing SELinux directory mmap denials.
+3. **Display Lifecycle Safety**: Thread B's standard context tears down using `destroy(terminateDisplay = false)` so it does not terminate the process-wide `EGL_DEFAULT_DISPLAY` singleton while Thread A's robust context is still active.
+4. **Real-time Native Logcat Streaming**: A background thread monitors `logcat --pid=$myPid` and pipes native messages directly into the on-screen console (`[SYS] ...`), ensuring assertions printed by `libEGL` or `AdrenoGLES-0` are immediately visible.
 
 ---
 
-## 5. Building and Running
+## 5. Live Reproduction Logs: Pixel 5 (Adreno 620) vs. Pixel 8 Pro (Mali-G715)
+
+The logs below were captured from live physical hardware running the identical test suite:
+
+### A. Affected Device: Google Pixel 5 (Qualcomm Adreno 620)
+
+**Driver & GPU Identification:**
+```text
+QUALCOMM build                   : 4783c89, I46ff5fc46f
+Build Date                       : 11/30/20
+OpenGL ES Shader Compiler Version: EV031.31.04.01
+Build Config                     : S P 10.0.4 AArch64
+Driver Path                      : /vendor/lib64/egl/libGLESv2_adreno.so
+GPU Initialized: Adreno (TM) 620 (OpenGL ES 3.2 V@0490.0 (GIT@4783c89, I46ff5fc46f, 1606807783) (Date:11/30/20)) | Vendor: Qualcomm
+```
+
+**Cross-Context Poisoning Test Execution:**
+```text
+>>> STARTING: 4. Cross-Context Poisoning Test
+>>> STEP 1: Thread A creates ROBUST context (0x30BF=1)...
+Attempting robust EGL context creation: Primary [clientVersion=2, 0x30BF=1, 0x31BD=0x31BE] (attribs=[0x3098, 0x2, 0x30bf, 0x1, 0x31bd, 0x31be, 0x3038])...
+Robust EGL context created successfully using Primary [clientVersion=2, 0x30BF=1, 0x31BD=0x31BE].
+eglMakeCurrent succeeded.
+[Thread A] Robust context created and made current.
+Testing Context A Safe Shader (Shader running inside robust context)...
+Context A Safe Shader LINK SUCCESS in 8 ms.
+[Thread A] Safe shader link: SUCCESS
+--------------------------------------------------
+>>> STEP 2: Thread B creates STANDARD context...
+  Thread B attribs: [0x3098=2, 0x3038=EGL_NONE] (ZERO robust attributes!)
+Standard EGL context created successfully.
+eglMakeCurrent succeeded.
+[Thread B] Standard context created and made current.
+>>> STEP 3: Thread B links Dynamic Indexing Shader (which PASSED in Button 1)...
+Testing Dynamic Indexing Shader (Dynamic uniform array indexing via attribute)...
+Calling glLinkProgram for Dynamic Indexing Shader...
+Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
+Dynamic Indexing Shader LINK FAILED (status=0) in 9 ms. InfoLog: Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
+--- Dynamic Indexing Shader (Dynamic uniform array indexing via attribute) ---
+  GL_RENDERER : Adreno (TM) 620
+  GL_VERSION  : OpenGL ES 3.2 V@0490.0 (GIT@4783c89, I46ff5fc46f, 1606807783) (Date:11/30/20)
+  GL_VENDOR   : Qualcomm
+  VS Compile  : SUCCESS 
+  FS Compile  : SUCCESS 
+  Link Status : 0 (FAILED (GL_FALSE))
+  Link Time   : 9 ms
+  Link InfoLog: Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
+  Outcome     : FAILED
+
+[CRITICAL: CROSS-CONTEXT DRIVER BLEEDING CONFIRMED!]
+Context B (STANDARD) FAILED to link Dynamic Indexing Shader!
+  Context B Attribs: [0x3098, 2, 0x3038] (NO ROBUST ACCESS)
+  Assertion Error  : Assertion failed: GVI && "cannot compute gv size for oob (no global info)"
+  Explanation: Robust access from Thread A permanently poisoned the process-wide Qualcomm compiler backend (/vendor/lib64/egl/libGLESv2_adreno.so / libllvm-glnext.so)!
+```
+
+---
+
+### B. Control Device: Google Pixel 8 Pro (ARM Mali-G715 MC7)
+
+**Driver & GPU Identification:**
+```text
+GPU Initialized: Mali-G715 MC7 (OpenGL ES 3.2 v1.r56p0-18eac0.285f3c61d48c74d025f038abebe42a6a) | Vendor: ARM
+```
+
+**Cross-Context Poisoning Test Execution:**
+```text
+>>> STARTING: 4. Cross-Context Poisoning Test
+>>> STEP 1: Thread A creates ROBUST context (0x30BF=1)...
+Attempting robust EGL context creation: Primary [clientVersion=2, 0x30BF=1, 0x31BD=0x31BE] (attribs=[0x3098, 0x2, 0x30bf, 0x1, 0x31bd, 0x31be, 0x3038])...
+Robust EGL context created successfully using Primary [clientVersion=2, 0x30BF=1, 0x31BD=0x31BE].
+eglMakeCurrent succeeded.
+[Thread A] Robust context created and made current.
+Testing Context A Safe Shader (Shader running inside robust context)...
+Context A Safe Shader LINK SUCCESS in 1 ms.
+[Thread A] Safe shader link: SUCCESS
+--------------------------------------------------
+>>> STEP 2: Thread B creates STANDARD context...
+  Thread B attribs: [0x3098=2, 0x3038=EGL_NONE] (ZERO robust attributes!)
+Standard EGL context created successfully.
+eglMakeCurrent succeeded.
+[Thread B] Standard context created and made current.
+>>> STEP 3: Thread B links Dynamic Indexing Shader (which PASSED in Button 1)...
+Testing Dynamic Indexing Shader (Dynamic uniform array indexing via attribute)...
+Calling glLinkProgram for Dynamic Indexing Shader...
+Dynamic Indexing Shader LINK SUCCESS in 1 ms.
+--- Dynamic Indexing Shader (Dynamic uniform array indexing via attribute) ---
+  GL_RENDERER : Mali-G715 MC7
+  GL_VERSION  : OpenGL ES 3.2 v1.r56p0-18eac0.285f3c61d48c74d025f038abebe42a6a
+  GL_VENDOR   : ARM
+  VS Compile  : SUCCESS 
+  FS Compile  : SUCCESS 
+  Link Status : 1 (SUCCESS (GL_TRUE))
+  Link Time   : 1 ms
+  Link InfoLog: <empty>
+  Outcome     : PASSED
+
+[NO POISONING DETECTED]: Dynamic Indexing Shader linked successfully on standard context.
+```
+
+---
+
+## 6. Building and Running
 
 ### Prerequisites
 - Physical Qualcomm device with an Adreno 6xx or 7xx GPU (e.g. Pixel 4, Pixel 5, Galaxy S20/S21/S22 Snapdragon, Xiaomi 10/11/12).
