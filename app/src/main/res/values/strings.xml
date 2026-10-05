@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Qualcomm GL Context Bleed Repro</string>
+    <string name="device_info_loading">Device Info: Loading&#8230;</string>
+    <string name="run_baseline">1. Standard Context (Dynamic Indexing) [Expect: PASS]</string>
+    <string name="run_robust_safe">2. Robust Context (Safe Shader) [Expect: PASS]</string>
+    <string name="trigger_gvi_crash">3. Direct Driver Bug (Robust + Dynamic Indexing) [Expect: FAIL]</string>
+    <string name="run_poisoning">4. Cross-Context Poisoning Test [Expect: BLEED / FAIL]</string>
+    <string name="clear_shader_cache">Clear Shader Cache</string>
+    <string name="clear_log">Clear Log</string>
+    <string name="status_idle">Status: Idle</string>
+    <string name="log_header">Log Output (Logcat tag: ADRENO_REPRO):</string>
+</resources>

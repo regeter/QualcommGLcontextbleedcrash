@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#121212">
+
+    <!-- Device Info Header -->
+    <TextView
+        android:id="@+id/tv_device_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/device_info_loading"
+        android:textColor="#BB86FC"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp" />
+
+    <!-- Action Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="8dp">
+
+        <!-- Button 1: Standard Context + Dynamic Indexing -->
+        <Button
+            android:id="@+id/btn_run_baseline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/run_baseline"
+            android:backgroundTint="#1B5E20"
+            android:textColor="#FFFFFF"
+            android:textAllCaps="false"
+            android:textSize="12sp" />
+
+        <!-- Button 2: Robust Context + Safe Shader -->
+        <Button
+            android:id="@+id/btn_run_robust_safe"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/run_robust_safe"
+            android:backgroundTint="#2E7D32"
+            android:textColor="#FFFFFF"
+            android:textAllCaps="false"
+            android:textSize="12sp" />
+
+        <!-- Button 3: Direct Driver Crash (Robust Context + Dynamic Indexing) -->
+        <Button
+            android:id="@+id/btn_trigger_gvi_crash"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/trigger_gvi_crash"
+            android:backgroundTint="#B00020"
+            android:textColor="#FFFFFF"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="12sp" />
+
+        <!-- Button 4: Cross-Context Poisoning Test -->
+        <Button
+            android:id="@+id/btn_run_poisoning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/run_poisoning"
+            android:backgroundTint="#D84315"
+            android:textColor="#FFFFFF"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_clear_cache"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="@string/clear_shader_cache"
+                android:textAllCaps="false"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btn_clear_log"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.6"
+                android:layout_marginStart="4dp"
+                android:text="@string/clear_log"
+                android:textAllCaps="false"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Status indicator -->
+    <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/status_idle"
+        android:textColor="#03DAC5"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:paddingBottom="6dp" />
+
+    <!-- Log Header -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/log_header"
+        android:textColor="#AAAAAA"
+        android:textSize="11sp"
+        android:paddingBottom="4dp" />
+
+    <!-- Log Output Container -->
+    <ScrollView
+        android:id="@+id/scroll_view_log"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#1E1E1E"
+        android:padding="8dp"
+        android:fillViewport="true">
+
+        <TextView
+            android:id="@+id/tv_log_output"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#00FF66"
+            android:textSize="11sp"
+            android:textIsSelectable="true"
+            tools:text="Logs will appear here..." />
+    </ScrollView>
+</LinearLayout>
